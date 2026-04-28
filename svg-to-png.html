@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SVG to PNG Online</title>
+  <style>
+    body {
+      margin: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      color: #222;
+    }
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      margin-bottom: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    textarea {
+      width: 100%;
+      min-height: 320px;
+      font-family: Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      padding: 10px;
+      box-sizing: border-box;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+    }
+    input[type="number"] {
+      width: 88px;
+      padding: 4px 6px;
+    }
+    input[type="text"] {
+      width: 180px;
+      padding: 4px 6px;
+    }
+    button {
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+    .tip {
+      margin: 0 0 8px;
+      color: #57606a;
+      font-size: 13px;
+    }
+    .preview-wrap {
+      margin-top: 12px;
+    }
+    .preview-title {
+      margin: 0 0 8px;
+      font-size: 13px;
+      color: #57606a;
+    }
+    .preview-box {
+      min-height: 180px;
+      border: 1px dashed #d0d7de;
+      border-radius: 6px;
+      padding: 12px;
+      box-sizing: border-box;
+      overflow: auto;
+      background: #fff;
+    }
+    .preview-placeholder {
+      color: #8c959f;
+      font-size: 13px;
+    }
+    .preview-error {
+      color: #d1242f;
+      font-size: 13px;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <p class="tip">请粘贴完整的 SVG 标签内容（从 <code>&lt;svg ...&gt;</code> 到 <code>&lt;/svg&gt;</code>）。</p>
+
+  <textarea id="svgInput" placeholder="<svg xmlns='http://www.w3.org/2000/svg' width='300' height='120'>..."></textarea>
+
+  <div class="toolbar">
+    <label>
+      清晰倍数:
+      <input id="scaleInput" type="number" min="1" step="1" value="4">
+    </label>
+    <label>
+      文件名:
+      <input id="filenameInput" type="text" value="export.png">
+    </label>
+    <button type="button" id="btnExportPng">下载 PNG</button>
+  </div>
+
+  <div class="preview-wrap">
+    <p class="preview-title">预览：</p>
+    <div id="previewBox" class="preview-box">
+      <div class="preview-placeholder">粘贴 SVG 后会在这里显示预览</div>
+    </div>
+  </div>
+
+  <script>
+    function downloadSvgAsHighResPng(svgEl, opts) {
+      opts = opts || {};
+      var scale = opts.scale != null ? opts.scale : 3;
+      var filename = opts.filename || "export.png";
+      var backgroundColor = opts.backgroundColor !== undefined ? opts.backgroundColor : "#ffffff";
+
+      return new Promise(function (resolve, reject) {
+        if (!svgEl || String(svgEl.tagName).toLowerCase() !== "svg") {
+          reject(new Error("请传入 SVG 根节点"));
+          return;
+        }
+
+        var svg = svgEl.cloneNode(true);
+        if (!svg.getAttribute("xmlns")) {
+          svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+        }
+
+        var w = parseFloat(svg.getAttribute("width")) || svgEl.clientWidth || svgEl.getBoundingClientRect().width;
+        var h = parseFloat(svg.getAttribute("height")) || svgEl.clientHeight || svgEl.getBoundingClientRect().height;
+
+        if ((!w || !h) && svg.hasAttribute("viewBox")) {
+          var viewBox = svg.getAttribute("viewBox").trim().split(/\s+|,/).map(Number);
+          if (viewBox.length === 4 && viewBox[2] > 0 && viewBox[3] > 0) {
+            w = viewBox[2];
+            h = viewBox[3];
+          }
+        }
+
+        if (!w || !h) {
+          reject(new Error("无法解析 SVG 宽高，请补充 width/height 或 viewBox"));
+          return;
+        }
+
+        var source = new XMLSerializer().serializeToString(svg);
+        if (!/^<\?xml/i.test(source)) {
+          source = '<?xml version="1.0" encoding="UTF-8"?>' + source;
+        }
+
+        var svgBlob = new Blob([source], { type: "image/svg+xml;charset=utf-8" });
+        var url = URL.createObjectURL(svgBlob);
+        var img = new Image();
+
+        img.onload = function () {
+          try {
+            var canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.floor(w * scale));
+            canvas.height = Math.max(1, Math.floor(h * scale));
+            var ctx = canvas.getContext("2d");
+            if (backgroundColor) {
+              ctx.fillStyle = backgroundColor;
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+            ctx.setTransform(scale, 0, 0, scale, 0, 0);
+            ctx.drawImage(img, 0, 0, w, h);
+            URL.revokeObjectURL(url);
+
+            canvas.toBlob(function (blob) {
+              if (!blob) {
+                reject(new Error("PNG 生成失败"));
+                return;
+              }
+              var a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = filename;
+              a.rel = "noopener";
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(a.href);
+              resolve();
+            }, "image/png", 1);
+          } catch (e) {
+            URL.revokeObjectURL(url);
+            reject(e);
+          }
+        };
+
+        img.onerror = function () {
+          URL.revokeObjectURL(url);
+          reject(new Error("SVG 加载失败，请检查未定义引用、外链资源或非法标签"));
+        };
+
+        img.src = url;
+      });
+    }
+
+    function parseSvgFromInput(raw) {
+      var text = (raw || "").trim();
+      if (!text) {
+        throw new Error("请输入完整 SVG 标签内容");
+      }
+      if (!/^<svg[\s\S]*<\/svg>$/i.test(text)) {
+        throw new Error("输入内容必须是完整的 <svg>...</svg>");
+      }
+
+      var doc = new DOMParser().parseFromString(text, "image/svg+xml");
+      var parseError = doc.querySelector("parsererror");
+      if (parseError) {
+        throw new Error("SVG 解析失败，请检查标签是否闭合、属性是否正确");
+      }
+
+      var svg = doc.documentElement;
+      if (!svg || String(svg.tagName).toLowerCase() !== "svg") {
+        throw new Error("未找到 SVG 根节点");
+      }
+      return svg;
+    }
+
+    function showPreviewMessage(html, className) {
+      var box = document.getElementById("previewBox");
+      box.innerHTML = "";
+      var div = document.createElement("div");
+      div.className = className;
+      div.textContent = html;
+      box.appendChild(div);
+    }
+
+    function renderPreview(svgEl) {
+      var box = document.getElementById("previewBox");
+      box.innerHTML = "";
+      var svg = svgEl.cloneNode(true);
+      svg.style.maxWidth = "100%";
+      svg.style.height = "auto";
+      svg.style.display = "block";
+      box.appendChild(svg);
+    }
+
+    function updatePreview() {
+      var raw = document.getElementById("svgInput").value;
+      if (!raw.trim()) {
+        showPreviewMessage("粘贴 SVG 后会在这里显示预览", "preview-placeholder");
+        return;
+      }
+      try {
+        var svg = parseSvgFromInput(raw);
+        renderPreview(svg);
+      } catch (err) {
+        showPreviewMessage(err.message || String(err), "preview-error");
+      }
+    }
+
+    var previewTimer = null;
+    document.getElementById("svgInput").addEventListener("input", function () {
+      if (previewTimer) {
+        clearTimeout(previewTimer);
+      }
+      previewTimer = setTimeout(updatePreview, 150);
+    });
+
+    document.getElementById("btnExportPng").addEventListener("click", function () {
+      try {
+        var svgText = document.getElementById("svgInput").value;
+        var svg = parseSvgFromInput(svgText);
+        var scale = Number(document.getElementById("scaleInput").value) || 4;
+        if (scale <= 0) {
+          throw new Error("清晰倍数必须大于 0");
+        }
+        var filename = (document.getElementById("filenameInput").value || "").trim() || "export.png";
+        if (!/\.png$/i.test(filename)) {
+          filename += ".png";
+        }
+
+        downloadSvgAsHighResPng(svg, { scale: scale, filename: filename }).catch(function (err) {
+          console.error(err);
+          alert(err.message || String(err));
+        });
+      } catch (err) {
+        console.error(err);
+        alert(err.message || String(err));
+      }
+    });
+  </script>
+</body>
+</html>
